@@ -1,332 +1,190 @@
+%sql
 -- =====================================================================================
--- FILE: bronze_load_procedure.sql
--- DDL Script
--- PROJECT: Databricks Medallion Architecture (Bronze Layer)
---
--- DESCRIPTION:
---   This script creates:
---     1) A Bronze load log table for observability
---     2) A stored procedure (sp_load_bronze) that:
---        - Creates/Replaces Bronze tables (CRM + ERP)
---        - Truncates tables for clean reload
---        - Loads CSV data from Unity Catalog Volumes using COPY INTO
---        - Logs step-by-step progress, row counts, and durations (seconds)
+-- NOTEBOOK: Bronze Layer Setup + Loads
+-- PURPOSE:
+--   1) Create/replace Bronze Delta tables for CRM and ERP sources
+--   2) Bulk load CSV files from a Unity Catalog Volume into the Bronze tables
 --
 -- PLATFORM:
 --   Databricks Free Edition
 --   Unity Catalog enabled
---   Delta Lake tables
---   SQL Scripting stored procedure
+--   SQL Dialect: Spark SQL (Delta Lake)
 --
--- IMPORTANT:
---   1) Ensure the CSV files exist in these paths:
---      - /Volumes/datawarehouse/bronze/source_crm/cust_info.csv
---      - /Volumes/datawarehouse/bronze/source_crm/prd_info.csv
---      - /Volumes/datawarehouse/bronze/source_crm/sales_details.csv
---      - /Volumes/datawarehouse/bronze/source_erp/CUST_AZ12.csv
---      - /Volumes/datawarehouse/bronze/source_erp/LOC_A101.csv
---      - /Volumes/datawarehouse/bronze/source_erp/PX_CAT_G1V2.csv
---
---   2) Bronze tables intentionally match raw source formats:
---      - CRM sales dates remain INT (YYYYMMDD)
---      - ERP IDs remain STRING (alphanumeric)
---      - prd_cost remains INT as in source
---
--- HOW TO USE:
---   1) Run this file once to create the procedure.
---   2) Then execute:
---        CALL DataWarehouse.bronze.sp_load_bronze();
---   3) View logs:
---        SELECT * FROM DataWarehouse.bronze.bronze_load_log ORDER BY start_ts DESC;
+-- VOLUME USED (from your setup):
+--   /Volumes/datawarehouse/bronze/source_crm/
 -- =====================================================================================
 
-
--- =====================================================================================
--- 1) LOG TABLE (Observability)
---    Stores: run_id, step status, timestamps, and durations
--- =====================================================================================
-CREATE TABLE IF NOT EXISTS DataWarehouse.bronze.bronze_load_log (
-  run_id STRING,
-  step STRING,
-  status STRING,
-  message STRING,
-  start_ts TIMESTAMP,
-  end_ts TIMESTAMP,
-  duration_seconds BIGINT
+-- =========================
+-- CRM: Customer Information (matches cust_info.csv)
+-- =========================
+CREATE OR REPLACE TABLE DataWarehouse.bronze.crm_cust_info (
+    cst_id INT COMMENT 'Customer identifier',
+    cst_key STRING COMMENT 'Customer business key',
+    cst_firstname STRING COMMENT 'Customer first name',
+    cst_lastname STRING COMMENT 'Customer last name',
+    cst_marital_status STRING COMMENT 'Customer marital status (raw)',
+    cst_gndr STRING COMMENT 'Customer gender',
+    cst_create_date DATE COMMENT 'Customer record creation date'
 )
 USING DELTA
-COMMENT 'Detailed execution log for Bronze load procedure';
+COMMENT 'Bronze layer: raw customer information from CRM source system (no transformations)';
+
+-- =========================
+-- CRM: Product Information (matches prd_info.csv)
+--   NOTE: prd_cost in the CSV is inferred as INT, so we store it as INT in Bronze.
+--         Convert to DECIMAL in Silver/Gold if needed.
+-- =========================
+CREATE OR REPLACE TABLE DataWarehouse.bronze.crm_prd_info (
+    prd_id INT COMMENT 'Product identifier',
+    prd_key STRING COMMENT 'Business product key',
+    prd_nm STRING COMMENT 'Product name',
+    prd_cost INT COMMENT 'Product cost (raw integer)',
+    prd_line STRING COMMENT 'Product line or category',
+    prd_start_dt DATE COMMENT 'Product start date',
+    prd_end_dt DATE COMMENT 'Product end date'
+)
+USING DELTA
+COMMENT 'Bronze layer: raw product information from CRM source system (no transformations)';
+
+-- =========================
+-- CRM: Sales Details (matches sales_details.csv)
+--   NOTE: dates are in YYYYMMDD format in the CSV, so we store them as INT in Bronze.
+--         Convert to DATE in Silver.
+-- =========================
+CREATE OR REPLACE TABLE DataWarehouse.bronze.crm_sales_details (
+    sls_ord_num STRING COMMENT 'Sales order number (business key)',
+    sls_prd_key STRING COMMENT 'Product business key',
+    sls_cust_id INT COMMENT 'Customer identifier',
+    sls_order_dt INT COMMENT 'Order date in YYYYMMDD format (raw)',
+    sls_ship_dt INT COMMENT 'Shipment date in YYYYMMDD format (raw)',
+    sls_due_dt INT COMMENT 'Due date in YYYYMMDD format (raw)',
+    sls_sales INT COMMENT 'Total sales amount (raw integer)',
+    sls_quantity INT COMMENT 'Quantity sold',
+    sls_price INT COMMENT 'Unit price (raw integer)'
+)
+USING DELTA
+COMMENT 'Bronze layer: raw sales order details from CRM source system (no transformations)';
+
+---------new cell
+%sql
+-- Optional: clear tables if you want a clean reload (uncomment if needed)
+TRUNCATE TABLE DataWarehouse.bronze.crm_cust_info;
+TRUNCATE TABLE DataWarehouse.bronze.crm_prd_info;
+TRUNCATE TABLE DataWarehouse.bronze.crm_sales_details;
+
+-- Customer bulk load
+COPY INTO DataWarehouse.bronze.crm_cust_info
+FROM '/Volumes/datawarehouse/bronze/source_crm/cust_info.csv'
+FILEFORMAT = CSV
+FORMAT_OPTIONS ('header'='true', 'inferSchema'='true');
+
+-- Product bulk load
+COPY INTO DataWarehouse.bronze.crm_prd_info
+FROM '/Volumes/datawarehouse/bronze/source_crm/prd_info.csv'
+FILEFORMAT = CSV
+FORMAT_OPTIONS ('header'='true', 'inferSchema'='true');
+
+-- Sales bulk load
+COPY INTO DataWarehouse.bronze.crm_sales_details
+FROM '/Volumes/datawarehouse/bronze/source_crm/sales_details.csv'
+FILEFORMAT = CSV
+FORMAT_OPTIONS ('header'='true', 'inferSchema'='true');
+
+--New Cell
+dbutils.fs.ls("dbfs:/Volumes/datawarehouse/bronze/source_erp/")
+dbutils.fs.ls("/Volumes/datawarehouse/bronze/source_crm/")
+
+%sql
+SELECT 'crm_cust_info'      AS table_name, COUNT(*) AS row_count FROM DataWarehouse.bronze.crm_cust_info
+UNION ALL
+SELECT 'crm_prd_info'       AS table_name, COUNT(*) AS row_count FROM DataWarehouse.bronze.crm_prd_info
+UNION ALL
+SELECT 'crm_sales_details'  AS table_name, COUNT(*) AS row_count FROM DataWarehouse.bronze.crm_sales_details;
 
 
+--New Cell
+%sql
 -- =====================================================================================
--- 2) STORED PROCEDURE
+-- SCRIPT: ERP Bronze Tables + Bulk Loads (CSV)
+-- PLATFORM: Databricks Free Edition | Unity Catalog | Delta Lake
+-- SOURCE VOLUME: /Volumes/datawarehouse/bronze/source_erp/
 -- =====================================================================================
-CREATE OR REPLACE PROCEDURE DataWarehouse.bronze.sp_load_bronze()
-LANGUAGE SQL
-SQL SECURITY INVOKER
-AS
-BEGIN
 
-  -- -------------------------
-  -- Variables
-  -- -------------------------
-  DECLARE v_run_id STRING;
-  SET v_run_id = uuid();
+-- =========================
+-- Create/Replace ERP Bronze tables
+-- =========================
+-- =========================
+-- ERP: Customer Location
+-- =========================
+CREATE OR REPLACE TABLE DataWarehouse.bronze.erp_loc_a101 (
+  CID STRING COMMENT 'Customer identifier (raw, alphanumeric)',
+  CNTRY STRING COMMENT 'Customer country'
+)
+USING DELTA
+COMMENT 'Bronze layer: raw customer location data from ERP A101 source system';
 
-  -- -------------------------
-  -- TOTAL START (overall timer)
-  -- -------------------------
-  INSERT INTO DataWarehouse.bronze.bronze_load_log
-  VALUES (
-    v_run_id, 'TOTAL', 'RUNNING',
-    'Bronze load started',
-    current_timestamp(), NULL, NULL
-  );
+-- =========================
+-- ERP: Customer Demographics
+-- =========================
+CREATE OR REPLACE TABLE DataWarehouse.bronze.erp_cust_az12 (
+  CID STRING COMMENT 'Customer identifier (raw, alphanumeric)',
+  BDATE DATE COMMENT 'Customer birth date',
+  GEN STRING COMMENT 'Customer gender'
+)
+USING DELTA
+COMMENT 'Bronze layer: raw customer demographic data from ERP AZ12 source system';
 
+-- =========================
+-- ERP: Product Category
+-- =========================
+CREATE OR REPLACE TABLE DataWarehouse.bronze.erp_px_cat_g1v2 (
+  ID STRING COMMENT 'Product identifier (raw, alphanumeric)',
+  CAT STRING COMMENT 'Product category',
+  SUBCAT STRING COMMENT 'Product sub-category',
+  MAINTENANCE STRING COMMENT 'Maintenance or service classification'
+)
+USING DELTA
+COMMENT 'Bronze layer: raw product category and maintenance classification data from ERP system';
 
-  -- ===================================================================================
-  -- STEP 1: CREATE / REPLACE TABLES (CRM + ERP)
-  -- ===================================================================================
-  INSERT INTO DataWarehouse.bronze.bronze_load_log
-  VALUES (
-    v_run_id, 'CREATE_TABLES', 'RUNNING',
-    'Creating/Replacing Bronze tables (CRM + ERP)',
-    current_timestamp(), NULL, NULL
-  );
+-- =========================
+-- Optional: TRUNCATE for clean reload (uncomment if needed)
+-- =========================
+TRUNCATE TABLE DataWarehouse.bronze.erp_cust_az12;
+TRUNCATE TABLE DataWarehouse.bronze.erp_loc_a101;
+TRUNCATE TABLE DataWarehouse.bronze.erp_px_cat_g1v2;
 
-  -- -------------------------
-  -- CRM tables (match CSV)
-  -- -------------------------
-  CREATE OR REPLACE TABLE DataWarehouse.bronze.crm_cust_info (
-    cst_id INT,
-    cst_key STRING,
-    cst_firstname STRING,
-    cst_lastname STRING,
-    cst_marital_status STRING,
-    cst_gndr STRING,
-    cst_create_date DATE
-  )
-  USING DELTA
-  COMMENT 'Bronze: CRM customer raw';
+-- =========================
+-- Bulk load from CSV files using COPY INTO
+-- =========================
 
-  CREATE OR REPLACE TABLE DataWarehouse.bronze.crm_prd_info (
-    prd_id INT,
-    prd_key STRING,
-    prd_nm STRING,
-    prd_cost INT,
-    prd_line STRING,
-    prd_start_dt DATE,
-    prd_end_dt DATE
-  )
-  USING DELTA
-  COMMENT 'Bronze: CRM product raw';
+-- ERP CUST_AZ12
+COPY INTO DataWarehouse.bronze.erp_cust_az12
+FROM '/Volumes/datawarehouse/bronze/source_erp/CUST_AZ12.csv'
+FILEFORMAT = CSV
+FORMAT_OPTIONS ('header'='true', 'inferSchema'='true');
 
-  CREATE OR REPLACE TABLE DataWarehouse.bronze.crm_sales_details (
-    sls_ord_num STRING,
-    sls_prd_key STRING,
-    sls_cust_id INT,
-    sls_order_dt INT,   -- raw YYYYMMDD
-    sls_ship_dt INT,    -- raw YYYYMMDD
-    sls_due_dt INT,     -- raw YYYYMMDD
-    sls_sales INT,      -- raw integer
-    sls_quantity INT,
-    sls_price INT       -- raw integer
-  )
-  USING DELTA
-  COMMENT 'Bronze: CRM sales raw (dates as YYYYMMDD int)';
+-- ERP LOC_A101
+COPY INTO DataWarehouse.bronze.erp_loc_a101
+FROM '/Volumes/datawarehouse/bronze/source_erp/LOC_A101.csv'
+FILEFORMAT = CSV
+FORMAT_OPTIONS ('header'='true', 'inferSchema'='true');
 
-  -- -------------------------
-  -- ERP tables (match CSV exactly; uppercase + raw types)
-  -- -------------------------
-  CREATE OR REPLACE TABLE DataWarehouse.bronze.erp_cust_az12 (
-    CID STRING,   -- alphanumeric
-    BDATE DATE,
-    GEN STRING
-  )
-  USING DELTA
-  COMMENT 'Bronze: ERP customer demographics raw';
+-- ERP PX_CAT_G1V2
+COPY INTO DataWarehouse.bronze.erp_px_cat_g1v2
+FROM '/Volumes/datawarehouse/bronze/source_erp/PX_CAT_G1V2.csv'
+FILEFORMAT = CSV
+FORMAT_OPTIONS ('header'='true', 'inferSchema'='true');
 
-  CREATE OR REPLACE TABLE DataWarehouse.bronze.erp_loc_a101 (
-    CID STRING,   -- alphanumeric
-    CNTRY STRING
-  )
-  USING DELTA
-  COMMENT 'Bronze: ERP customer location raw';
-
-  CREATE OR REPLACE TABLE DataWarehouse.bronze.erp_px_cat_g1v2 (
-    ID STRING,    -- alphanumeric
-    CAT STRING,
-    SUBCAT STRING,
-    MAINTENANCE STRING
-  )
-  USING DELTA
-  COMMENT 'Bronze: ERP product category raw';
-
-  -- End CREATE_TABLES step (duration fixed using current_timestamp())
-  UPDATE DataWarehouse.bronze.bronze_load_log
-  SET
-    status = 'OK',
-    end_ts = current_timestamp(),
-    duration_seconds = unix_timestamp(current_timestamp()) - unix_timestamp(start_ts),
-    message = 'Tables created/replaced'
-  WHERE run_id = v_run_id AND step = 'CREATE_TABLES';
+---new Cell
+%sql
+SELECT 'erp_cust_az12' AS table_name, COUNT(*) AS row_count FROM DataWarehouse.bronze.erp_cust_az12
+UNION ALL
+SELECT 'erp_loc_a101'  AS table_name, COUNT(*) AS row_count FROM DataWarehouse.bronze.erp_loc_a101
+UNION ALL
+SELECT 'erp_px_cat_g1v2' AS table_name, COUNT(*) AS row_count FROM DataWarehouse.bronze.erp_px_cat_g1v2;
 
 
 
-  -- ===================================================================================
-  -- STEP 2: TRUNCATE TABLES (Clean Reload)
-  -- ===================================================================================
-  INSERT INTO DataWarehouse.bronze.bronze_load_log
-  VALUES (
-    v_run_id, 'TRUNCATE', 'RUNNING',
-    'Truncating Bronze tables for clean reload',
-    current_timestamp(), NULL, NULL
-  );
-
-  TRUNCATE TABLE DataWarehouse.bronze.crm_cust_info;
-  TRUNCATE TABLE DataWarehouse.bronze.crm_prd_info;
-  TRUNCATE TABLE DataWarehouse.bronze.crm_sales_details;
-  TRUNCATE TABLE DataWarehouse.bronze.erp_cust_az12;
-  TRUNCATE TABLE DataWarehouse.bronze.erp_loc_a101;
-  TRUNCATE TABLE DataWarehouse.bronze.erp_px_cat_g1v2;
-
-  UPDATE DataWarehouse.bronze.bronze_load_log
-  SET
-    status = 'OK',
-    end_ts = current_timestamp(),
-    duration_seconds = unix_timestamp(current_timestamp()) - unix_timestamp(start_ts),
-    message = 'Tables truncated'
-  WHERE run_id = v_run_id AND step = 'TRUNCATE';
 
 
 
-  -- ===================================================================================
-  -- STEP 3: LOAD DATA USING COPY INTO
-  -- ===================================================================================
-  INSERT INTO DataWarehouse.bronze.bronze_load_log
-  VALUES (
-    v_run_id, 'LOAD', 'RUNNING',
-    'Loading CSV files into Bronze via COPY INTO',
-    current_timestamp(), NULL, NULL
-  );
-
-  -- -------------------------
-  -- CRM loads
-  -- -------------------------
-  COPY INTO DataWarehouse.bronze.crm_cust_info
-  FROM '/Volumes/datawarehouse/bronze/source_crm/cust_info.csv'
-  FILEFORMAT = CSV
-  FORMAT_OPTIONS ('header'='true', 'inferSchema'='true');
-
-  COPY INTO DataWarehouse.bronze.crm_prd_info
-  FROM '/Volumes/datawarehouse/bronze/source_crm/prd_info.csv'
-  FILEFORMAT = CSV
-  FORMAT_OPTIONS ('header'='true', 'inferSchema'='true');
-
-  COPY INTO DataWarehouse.bronze.crm_sales_details
-  FROM '/Volumes/datawarehouse/bronze/source_crm/sales_details.csv'
-  FILEFORMAT = CSV
-  FORMAT_OPTIONS ('header'='true', 'inferSchema'='true');
-
-  -- -------------------------
-  -- ERP loads
-  -- -------------------------
-  COPY INTO DataWarehouse.bronze.erp_cust_az12
-  FROM '/Volumes/datawarehouse/bronze/source_erp/CUST_AZ12.csv'
-  FILEFORMAT = CSV
-  FORMAT_OPTIONS ('header'='true', 'inferSchema'='true');
-
-  COPY INTO DataWarehouse.bronze.erp_loc_a101
-  FROM '/Volumes/datawarehouse/bronze/source_erp/LOC_A101.csv'
-  FILEFORMAT = CSV
-  FORMAT_OPTIONS ('header'='true', 'inferSchema'='true');
-
-  COPY INTO DataWarehouse.bronze.erp_px_cat_g1v2
-  FROM '/Volumes/datawarehouse/bronze/source_erp/PX_CAT_G1V2.csv'
-  FILEFORMAT = CSV
-  FORMAT_OPTIONS ('header'='true', 'inferSchema'='true');
-
-  UPDATE DataWarehouse.bronze.bronze_load_log
-  SET
-    status = 'OK',
-    end_ts = current_timestamp(),
-    duration_seconds = unix_timestamp(current_timestamp()) - unix_timestamp(start_ts),
-    message = 'All COPY INTO loads completed'
-  WHERE run_id = v_run_id AND step = 'LOAD';
-
-
-
-  -- ===================================================================================
-  -- STEP 4: ROW COUNTS (Audit)
-  -- ===================================================================================
-  INSERT INTO DataWarehouse.bronze.bronze_load_log
-  SELECT v_run_id, 'ROWCOUNT', 'OK',
-         concat('crm_cust_info rows=', COUNT(*)),
-         current_timestamp(), current_timestamp(), 0
-  FROM DataWarehouse.bronze.crm_cust_info;
-
-  INSERT INTO DataWarehouse.bronze.bronze_load_log
-  SELECT v_run_id, 'ROWCOUNT', 'OK',
-         concat('crm_prd_info rows=', COUNT(*)),
-         current_timestamp(), current_timestamp(), 0
-  FROM DataWarehouse.bronze.crm_prd_info;
-
-  INSERT INTO DataWarehouse.bronze.bronze_load_log
-  SELECT v_run_id, 'ROWCOUNT', 'OK',
-         concat('crm_sales_details rows=', COUNT(*)),
-         current_timestamp(), current_timestamp(), 0
-  FROM DataWarehouse.bronze.crm_sales_details;
-
-  INSERT INTO DataWarehouse.bronze.bronze_load_log
-  SELECT v_run_id, 'ROWCOUNT', 'OK',
-         concat('erp_cust_az12 rows=', COUNT(*)),
-         current_timestamp(), current_timestamp(), 0
-  FROM DataWarehouse.bronze.erp_cust_az12;
-
-  INSERT INTO DataWarehouse.bronze.bronze_load_log
-  SELECT v_run_id, 'ROWCOUNT', 'OK',
-         concat('erp_loc_a101 rows=', COUNT(*)),
-         current_timestamp(), current_timestamp(), 0
-  FROM DataWarehouse.bronze.erp_loc_a101;
-
-  INSERT INTO DataWarehouse.bronze.bronze_load_log
-  SELECT v_run_id, 'ROWCOUNT', 'OK',
-         concat('erp_px_cat_g1v2 rows=', COUNT(*)),
-         current_timestamp(), current_timestamp(), 0
-  FROM DataWarehouse.bronze.erp_px_cat_g1v2;
-
-
-  -- ===================================================================================
-  -- TOTAL END (overall duration)
-  -- ===================================================================================
-  UPDATE DataWarehouse.bronze.bronze_load_log
-  SET
-    status = 'OK',
-    end_ts = current_timestamp(),
-    duration_seconds = unix_timestamp(current_timestamp()) - unix_timestamp(start_ts),
-    message = 'Bronze load completed successfully'
-  WHERE run_id = v_run_id AND step = 'TOTAL';
-
-END;
-
-
--- =====================================================================================
--- 3) RUN COMMAND (use in another cell)
--- =====================================================================================
--- CALL DataWarehouse.bronze.sp_load_bronze();
-
-
--- =====================================================================================
--- 4) VIEW LATEST RUN LOGS
--- =====================================================================================
--- Latest run_id (most recent start)
--- WITH latest_run AS (
---   SELECT run_id
---   FROM DataWarehouse.bronze.bronze_load_log
---   ORDER BY start_ts DESC
---   LIMIT 1
--- )
--- SELECT *
--- FROM DataWarehouse.bronze.bronze_load_log
--- WHERE run_id = (SELECT run_id FROM latest_run)
--- ORDER BY start_ts;
