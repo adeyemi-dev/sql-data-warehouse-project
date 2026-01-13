@@ -8,7 +8,10 @@ This project demonstrates a comprehensive data warehousing and analytics solutio
 
 The data architecture for this project follows Medallion Architecture **Bronze**, **Silver**, and **Gold** layers:
 
-<img width="1401" height="911" alt="image" src="https://github.com/user-attachments/assets/0b593764-f14f-4908-be5d-01575fd43d8e" />
+<!-- <img width="1401" height="911" alt="image" src="https://github.com/user-attachments/assets/0b593764-f14f-4908-be5d-01575fd43d8e" /> -->
+<img width="5684" height="3564" alt="image" src="https://github.com/user-attachments/assets/321b38da-90a9-403f-bc1d-87cde309d3d0" />
+
+
 
 
 
