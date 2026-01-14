@@ -1,7 +1,9 @@
 # Data Warehouse and Analytics Project
 
 Welcome to the **Data Warehouse and Analytics Project** repository! 🚀  
-This project demonstrates a comprehensive data warehousing and analytics solution, from building a data warehouse to generating actionable insights. Designed as a portfolio project, it highlights industry best practices in data engineering and analytics.
+This project showcases a production-style data warehousing and analytics solution built on Databricks, using the Medallion Architecture (Bronze, Silver, Gold) to transform raw source data into trusted, analytics-ready datasets.
+
+Designed as a portfolio and learning project, it demonstrates real-world data engineering best practices, including layered data modeling, data quality validation, and star-schema design optimised for business intelligence and reporting.
 
 ---
 ## 🏗️ Data Architecture
