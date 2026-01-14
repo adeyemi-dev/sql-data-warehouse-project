@@ -100,5 +100,14 @@ data-warehouse-project/
 ```
 ---
 
+
+## 👤 About Me
+
+I’m Afeez Laguda, a Data Engineer / Analytics Engineer with strong hands-on experience building end-to-end data platforms on Databricks using the Medallion Architecture (Bronze, Silver, Gold).
+
+I specialise in SQL-based data engineering, Delta Lake, dimensional modelling, and data quality frameworks, delivering analytics-ready datasets that power Power BI dashboards and business reporting.
+
+This project reflects how I work in real production environments — transforming raw data into trusted Gold-layer models, enforcing data quality, and enabling clear, high-impact insights for stakeholders.
+
 ## ☕ Stay Connected
 linkedIn : www.linkedin.com/in/adeyemi-laguda-7b2256150
