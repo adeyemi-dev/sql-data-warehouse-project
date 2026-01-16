@@ -110,4 +110,4 @@ I specialise in SQL-based data engineering, Delta Lake, dimensional modelling, a
 This project reflects how I work in real production environments — transforming raw data into trusted Gold-layer models, enforcing data quality, and enabling clear, high-impact insights for stakeholders.
 
 ## ☕ Stay Connected
-linkedIn : www.linkedin.com/in/adeyemi-laguda-7b2256150
+linkedIn : https://www.linkedin.com/in/afeez-laguda-7b2256150/
